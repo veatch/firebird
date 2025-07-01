@@ -1,4 +1,4 @@
-# Spotify Analytics
+# Firebird Songs
 
 A web application that analyzes your Spotify listening history by identifying your annual "Your Top Songs" playlists and calculating which songs were most popular across multiple years based on frequency of appearance and ranking position.
 
@@ -32,7 +32,7 @@ A web application that analyzes your Spotify listening history by identifying yo
 1. **Clone the repository**
    ```bash
    git clone <repository-url>
-   cd spotify-analytics
+   cd firebird-songs
    ```
 
 2. **Install dependencies**

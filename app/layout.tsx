@@ -6,7 +6,7 @@ import { AuthProvider } from '@/components/providers/auth-provider'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'Spotify Analytics',
+  title: 'Firebird Songs',
   description: 'Analyze your Spotify listening history and discover your most popular songs across years',
   viewport: 'width=device-width, initial-scale=1, maximum-scale=1',
 }

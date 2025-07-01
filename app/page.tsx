@@ -19,7 +19,7 @@ export default async function HomePage() {
         <div className="text-center space-y-8">
           <div className="space-y-4">
             <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold text-white">
-              Spotify Analytics
+              Firebird Songs
             </h1>
             <p className="text-xl sm:text-2xl text-white/90 max-w-2xl mx-auto">
               Discover your most popular songs across years and analyze your listening patterns
