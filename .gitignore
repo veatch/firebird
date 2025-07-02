@@ -171,3 +171,5 @@ temp/
 
 # Local development
 .local
+
+/generated/prisma

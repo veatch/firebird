@@ -1,0 +1,82 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String   @id @default(cuid())
+  spotifyId     String   @unique @map("spotify_id")
+  accessToken   String   @map("access_token")
+  refreshToken  String   @map("refresh_token")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  
+  playlists     Playlist[]
+  songRankings  SongRanking[]
+  
+  @@map("users")
+}
+
+model Playlist {
+  id                String   @id @default(cuid())
+  userId            String   @map("user_id")
+  spotifyPlaylistId String   @unique @map("spotify_playlist_id")
+  name              String
+  year              Int
+  totalTracks       Int      @map("total_tracks")
+  lastUpdated       DateTime @default(now()) @map("last_updated")
+  
+  user              User           @relation(fields: [userId], references: [id])
+  playlistTracks    PlaylistTrack[]
+  
+  @@unique([userId, spotifyPlaylistId])
+  @@map("playlists")
+}
+
+model PlaylistTrack {
+  id              String   @id @default(cuid())
+  playlistId      String   @map("playlist_id")
+  spotifyTrackId  String   @map("spotify_track_id")
+  trackName       String   @map("track_name")
+  artistName      String   @map("artist_name")
+  albumName       String   @map("album_name")
+  position        Int
+  addedAt         DateTime @default(now()) @map("added_at")
+  
+  playlist        Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+  
+  @@unique([playlistId, spotifyTrackId])
+  @@map("playlist_tracks")
+}
+
+model SongRanking {
+  id                String   @id @default(cuid())
+  userId            String   @map("user_id")
+  spotifyTrackId    String   @map("spotify_track_id")
+  trackName         String   @map("track_name")
+  artistName        String   @map("artist_name")
+  albumName         String   @map("album_name")
+  popularityScore   Float    @map("popularity_score")
+  yearsAppeared     Int      @map("years_appeared")
+  totalAppearances  Int      @map("total_appearances")
+  averageRank       Float    @map("average_rank")
+  bestRank          Int      @map("best_rank")
+  worstRank         Int      @map("worst_rank")
+  calculatedAt      DateTime @default(now()) @map("calculated_at")
+  
+  user              User     @relation(fields: [userId], references: [id])
+  
+  @@unique([userId, spotifyTrackId])
+  @@map("song_rankings")
+}
