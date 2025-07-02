@@ -82,30 +82,117 @@ users (
   updated_at: timestamp
 )
 
--- Cached playlist data
+-- Cached playlist metadata
 playlists (
   id: uuid PRIMARY KEY,
   user_id: uuid REFERENCES users(id),
-  spotify_playlist_id: varchar,
+  spotify_playlist_id: varchar UNIQUE,
   name: varchar,
   year: integer,
-  track_data: jsonb,
-  last_updated: timestamp
+  total_tracks: integer,
+  last_updated: timestamp,
+  UNIQUE(user_id, spotify_playlist_id)
 )
 
--- Calculated song rankings
+-- Individual tracks with their positions in each playlist
+playlist_tracks (
+  id: uuid PRIMARY KEY,
+  playlist_id: uuid REFERENCES playlists(id) ON DELETE CASCADE,
+  spotify_track_id: varchar,
+  track_name: varchar,
+  artist_name: varchar,
+  album_name: varchar,
+  position: integer, -- rank within the playlist
+  added_at: timestamp,
+  UNIQUE(playlist_id, spotify_track_id)
+)
+
+-- Pre-calculated song rankings (can be regenerated periodically)
 song_rankings (
   id: uuid PRIMARY KEY,
   user_id: uuid REFERENCES users(id),
-  track_id: varchar,
+  spotify_track_id: varchar,
   track_name: varchar,
   artist_name: varchar,
+  album_name: varchar,
   popularity_score: float,
-  years_appeared: integer[],
+  years_appeared: integer,
+  total_appearances: integer,
   average_rank: float,
-  calculated_at: timestamp
+  best_rank: integer,
+  worst_rank: integer,
+  calculated_at: timestamp,
+  UNIQUE(user_id, spotify_track_id)
 )
+
+-- Indexes for performance
+CREATE INDEX idx_playlists_user_year ON playlists(user_id, year);
+CREATE INDEX idx_playlist_tracks_playlist_position ON playlist_tracks(playlist_id, position);
+CREATE INDEX idx_playlist_tracks_track_id ON playlist_tracks(spotify_track_id);
+CREATE INDEX idx_song_rankings_user_score ON song_rankings(user_id, popularity_score DESC);
+CREATE INDEX idx_song_rankings_user_years ON song_rankings(user_id, years_appeared DESC);
 ```
+
+## Benefits of Normalized Schema
+
+### Efficient Analytical Queries
+The normalized schema enables fast, indexable queries for:
+
+1. **Counting song occurrences across years:**
+```sql
+SELECT 
+  pt.spotify_track_id,
+  pt.track_name,
+  pt.artist_name,
+  COUNT(DISTINCT p.year) as years_appeared,
+  COUNT(*) as total_appearances
+FROM playlist_tracks pt
+JOIN playlists p ON pt.playlist_id = p.id
+WHERE p.user_id = $1
+GROUP BY pt.spotify_track_id, pt.track_name, pt.artist_name
+ORDER BY years_appeared DESC, total_appearances DESC;
+```
+
+2. **Calculating average rank per song:**
+```sql
+SELECT 
+  pt.spotify_track_id,
+  pt.track_name,
+  pt.artist_name,
+  AVG(pt.position) as average_rank,
+  MIN(pt.position) as best_rank,
+  MAX(pt.position) as worst_rank
+FROM playlist_tracks pt
+JOIN playlists p ON pt.playlist_id = p.id
+WHERE p.user_id = $1
+GROUP BY pt.spotify_track_id, pt.track_name, pt.artist_name;
+```
+
+3. **Finding songs that appeared in multiple years:**
+```sql
+SELECT 
+  pt.spotify_track_id,
+  pt.track_name,
+  pt.artist_name,
+  array_agg(DISTINCT p.year ORDER BY p.year) as years_list
+FROM playlist_tracks pt
+JOIN playlists p ON pt.playlist_id = p.id
+WHERE p.user_id = $1
+GROUP BY pt.spotify_track_id, pt.track_name, pt.artist_name
+HAVING COUNT(DISTINCT p.year) > 1
+ORDER BY COUNT(DISTINCT p.year) DESC;
+```
+
+### Performance Advantages
+- **Indexed queries**: All analytical operations can use database indexes
+- **Reduced data transfer**: Only fetch necessary columns instead of entire JSONB objects
+- **Better caching**: Database can cache query results more effectively
+- **Scalability**: Handles large datasets efficiently as user base grows
+
+### Data Integrity
+- **Foreign key constraints**: Ensures referential integrity
+- **Unique constraints**: Prevents duplicate tracks within playlists
+- **Normalized structure**: Eliminates data redundancy and update anomalies
 
 ## Core Algorithm
 
@@ -142,9 +229,71 @@ function calculatePopularityScore(songAppearances) {
 }
 ```
 
-> Here's another score function from Cursor (it said "Tune weights for best results.")
-```
-  score = (number of years appeared) * weight1 + (sum of (max_rank - rank_in_year)) * weight2
+**Database Implementation:**
+```sql
+-- Function to calculate popularity score for a song
+CREATE OR REPLACE FUNCTION calculate_song_popularity_score(
+  p_user_id uuid,
+  p_track_id varchar
+) RETURNS float AS $$
+DECLARE
+  v_years_appeared integer;
+  v_avg_rank float;
+  v_rank_score float;
+  v_consistency_bonus float;
+BEGIN
+  -- Get years appeared and average rank
+  SELECT 
+    COUNT(DISTINCT p.year),
+    AVG(pt.position)
+  INTO v_years_appeared, v_avg_rank
+  FROM playlist_tracks pt
+  JOIN playlists p ON pt.playlist_id = p.id
+  WHERE p.user_id = p_user_id 
+    AND pt.spotify_track_id = p_track_id;
+  
+  -- Calculate score components
+  v_rank_score := GREATEST(0, 100 - v_avg_rank);
+  v_consistency_bonus := CASE WHEN v_years_appeared > 1 
+                              THEN v_years_appeared * 10 
+                              ELSE 0 END;
+  
+  RETURN (v_rank_score * v_years_appeared) + v_consistency_bonus;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Update song rankings table
+INSERT INTO song_rankings (
+  user_id, spotify_track_id, track_name, artist_name, album_name,
+  popularity_score, years_appeared, total_appearances, 
+  average_rank, best_rank, worst_rank, calculated_at
+)
+SELECT 
+  p.user_id,
+  pt.spotify_track_id,
+  pt.track_name,
+  pt.artist_name,
+  pt.album_name,
+  calculate_song_popularity_score(p.user_id, pt.spotify_track_id) as popularity_score,
+  COUNT(DISTINCT p.year) as years_appeared,
+  COUNT(*) as total_appearances,
+  AVG(pt.position) as average_rank,
+  MIN(pt.position) as best_rank,
+  MAX(pt.position) as worst_rank,
+  NOW() as calculated_at
+FROM playlist_tracks pt
+JOIN playlists p ON pt.playlist_id = p.id
+WHERE p.user_id = $1
+GROUP BY p.user_id, pt.spotify_track_id, pt.track_name, pt.artist_name, pt.album_name
+ON CONFLICT (user_id, spotify_track_id) 
+DO UPDATE SET
+  popularity_score = EXCLUDED.popularity_score,
+  years_appeared = EXCLUDED.years_appeared,
+  total_appearances = EXCLUDED.total_appearances,
+  average_rank = EXCLUDED.average_rank,
+  best_rank = EXCLUDED.best_rank,
+  worst_rank = EXCLUDED.worst_rank,
+  calculated_at = NOW();
 ```
 
 ## API Design
@@ -283,3 +432,365 @@ GET  /api/user/profile - Get user profile info
 - **OAuth Flow**: Complete within 30 seconds
 - **Analysis Generation**: < 10 seconds for average user
 - **Mobile Lighthouse Score**: > 90 for Performance and Accessibility
+
+## Database Schema Management
+
+### Prisma + Supabase (Recommended)
+
+**Best for**: TypeScript projects with strong typing requirements and seamless local/production workflow
+
+**Setup:**
+```bash
+npm install prisma @prisma/client
+npx prisma init
+```
+
+**Schema Definition (`prisma/schema.prisma`):**
+```prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String   @id @default(cuid())
+  spotifyId     String   @unique @map("spotify_id")
+  accessToken   String   @map("access_token")
+  refreshToken  String   @map("refresh_token")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  
+  playlists     Playlist[]
+  songRankings  SongRanking[]
+  
+  @@map("users")
+}
+
+model Playlist {
+  id                String   @id @default(cuid())
+  userId            String   @map("user_id")
+  spotifyPlaylistId String   @unique @map("spotify_playlist_id")
+  name              String
+  year              Int
+  totalTracks       Int      @map("total_tracks")
+  lastUpdated       DateTime @default(now()) @map("last_updated")
+  
+  user              User           @relation(fields: [userId], references: [id])
+  playlistTracks    PlaylistTrack[]
+  
+  @@unique([userId, spotifyPlaylistId])
+  @@map("playlists")
+}
+
+model PlaylistTrack {
+  id              String   @id @default(cuid())
+  playlistId      String   @map("playlist_id")
+  spotifyTrackId  String   @map("spotify_track_id")
+  trackName       String   @map("track_name")
+  artistName      String   @map("artist_name")
+  albumName       String   @map("album_name")
+  position        Int
+  addedAt         DateTime @default(now()) @map("added_at")
+  
+  playlist        Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+  
+  @@unique([playlistId, spotifyTrackId])
+  @@map("playlist_tracks")
+}
+
+model SongRanking {
+  id                String   @id @default(cuid())
+  userId            String   @map("user_id")
+  spotifyTrackId    String   @map("spotify_track_id")
+  trackName         String   @map("track_name")
+  artistName        String   @map("artist_name")
+  albumName         String   @map("album_name")
+  popularityScore   Float    @map("popularity_score")
+  yearsAppeared     Int      @map("years_appeared")
+  totalAppearances  Int      @map("total_appearances")
+  averageRank       Float    @map("average_rank")
+  bestRank          Int      @map("best_rank")
+  worstRank         Int      @map("worst_rank")
+  calculatedAt      DateTime @default(now()) @map("calculated_at")
+  
+  user              User     @relation(fields: [userId], references: [id])
+  
+  @@unique([userId, spotifyTrackId])
+  @@map("song_rankings")
+}
+```
+
+**Commands:**
+```bash
+# Generate migration
+npx prisma migrate dev --name init
+
+# Apply migrations to production
+npx prisma migrate deploy
+
+# Generate Prisma Client
+npx prisma generate
+
+# View database in browser
+npx prisma studio
+```
+
+**Benefits:**
+- **Type safety**: Full TypeScript support with generated types
+- **Auto-completion**: IDE support for all database operations
+- **Migration history**: Automatic migration file generation
+- **Database introspection**: Can introspect existing databases
+- **Prisma Studio**: Visual database browser
+- **Seamless local/production**: Same schema works in both environments
+
+## Recommendation
+
+**Prisma + Supabase is the ideal choice for this project** because:
+
+1. **TypeScript integration**: Perfect for your Next.js setup with full type safety
+2. **Developer experience**: Excellent IDE support, auto-completion, and Prisma Studio
+3. **Migration management**: Automatic migration file generation and version control
+4. **Local development**: Fast iteration with Docker PostgreSQL or local Supabase
+5. **Production ready**: Managed PostgreSQL with automatic backups and scaling
+6. **Cost effective**: Free tier for development, pay-as-you-grow for production
+7. **Community support**: Large ecosystem and comprehensive documentation
+8. **Performance**: Optimized queries and connection pooling
+
+## Local Development + Supabase Production Setup
+
+### Recommended Approach: Prisma + Supabase
+
+This combination gives you the best of both worlds - excellent local development experience with Prisma, and seamless deployment to Supabase's managed PostgreSQL.
+
+### Setup Instructions
+
+#### 1. Local Development Environment
+
+**Install dependencies:**
+```bash
+npm install prisma @prisma/client
+npm install -D @types/pg
+```
+
+**Initialize Prisma:**
+```bash
+npx prisma init
+```
+
+**Configure for local PostgreSQL (`prisma/schema.prisma`):**
+```prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ... your schema models here
+```
+
+**Local database setup options:**
+
+**Option A: Docker PostgreSQL (Recommended)**
+```bash
+# Create docker-compose.yml
+cat > docker-compose.yml << EOF
+version: '3.8'
+services:
+  db:
+    image: postgres:15
+    restart: always
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=firebird_dev
+    ports:
+      - '5432:5432'
+    volumes:
+      - db:/var/lib/postgresql/data
+volumes:
+  db:
+    driver: local
+EOF
+
+# Start database
+docker-compose up -d
+
+# Set environment variable
+echo "DATABASE_URL=postgresql://postgres:password@localhost:5432/firebird_dev" > .env.local
+```
+
+**Option B: Supabase Local Development**
+```bash
+# Install Supabase CLI
+npm install -g supabase
+
+# Initialize Supabase
+supabase init
+
+# Start local Supabase
+supabase start
+
+# This will output your local DATABASE_URL
+```
+
+#### 2. Development Workflow
+
+**Create and apply migrations:**
+```bash
+# Generate migration from schema changes
+npx prisma migrate dev --name add_initial_schema
+
+# Apply migrations to local database
+npx prisma migrate deploy
+
+# Generate Prisma Client
+npx prisma generate
+```
+
+**Database operations:**
+```bash
+# View database in browser
+npx prisma studio
+
+# Reset database (development only)
+npx prisma migrate reset
+
+# Seed database with test data
+npx prisma db seed
+```
+
+#### 3. Supabase Production Setup
+
+**Create Supabase project:**
+1. Go to [supabase.com](https://supabase.com)
+2. Create new project
+3. Note your project URL and anon key
+
+**Configure production environment:**
+```bash
+# Get your Supabase database URL from the dashboard
+# Format: postgresql://postgres:[password]@[host]:5432/postgres
+
+# Set production environment variables
+echo "DATABASE_URL=postgresql://postgres:[your-password]@[your-host]:5432/postgres" > .env.production
+echo "NEXT_PUBLIC_SUPABASE_URL=https://[your-project].supabase.co" >> .env.production
+echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=[your-anon-key]" >> .env.production
+```
+
+**Deploy schema to Supabase:**
+```bash
+# Apply migrations to production
+npx prisma migrate deploy
+
+# Generate Prisma Client for production
+npx prisma generate
+```
+
+#### 4. Environment Configuration
+
+**`.env.local` (local development):**
+```env
+DATABASE_URL=postgresql://postgres:password@localhost:5432/firebird_dev
+NEXT_PUBLIC_SUPABASE_URL=http://localhost:54321
+NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+```
+
+**`.env.production` (production):**
+```env
+DATABASE_URL=postgresql://postgres:[password]@[host]:5432/postgres
+NEXT_PUBLIC_SUPABASE_URL=https://[your-project].supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=[your-anon-key]
+```
+
+#### 5. Database Client Setup
+
+**`lib/db.ts`:**
+```typescript
+import { PrismaClient } from '@prisma/client'
+
+const globalForPrisma = globalThis as unknown as {
+  prisma: PrismaClient | undefined
+}
+
+export const prisma = globalForPrisma.prisma ?? new PrismaClient()
+
+if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma
+```
+
+**Usage in API routes:**
+```typescript
+// app/api/playlists/route.ts
+import { prisma } from '@/lib/db'
+
+export async function GET(request: Request) {
+  const playlists = await prisma.playlist.findMany({
+    include: {
+      playlistTracks: true,
+    },
+  })
+  
+  return Response.json(playlists)
+}
+```
+
+### Alternative: Drizzle + Supabase
+
+If you prefer Drizzle ORM:
+
+**Setup:**
+```bash
+npm install drizzle-orm pg
+npm install -D drizzle-kit @types/pg
+```
+
+**Configuration (`drizzle.config.ts`):**
+```typescript
+import type { Config } from 'drizzle-kit'
+
+export default {
+  schema: './drizzle/schema.ts',
+  out: './drizzle/migrations',
+  driver: 'pg',
+  dbCredentials: {
+    connectionString: process.env.DATABASE_URL!,
+  },
+} satisfies Config
+```
+
+**Commands:**
+```bash
+# Generate migrations
+npx drizzle-kit generate
+
+# Apply to local
+npx drizzle-kit push
+
+# Apply to production
+npx drizzle-kit migrate
+```
+
+### Benefits of This Approach
+
+1. **Consistent Schema**: Same schema definition works locally and in production
+2. **Type Safety**: Full TypeScript support across environments
+3. **Migration Management**: Version-controlled database changes
+4. **Local Development**: Fast iteration with local database
+5. **Production Ready**: Managed PostgreSQL with Supabase
+6. **Scalability**: Supabase handles scaling, backups, and monitoring
+7. **Cost Effective**: Free tier for development, pay-as-you-grow for production
+
+### Deployment Workflow
+
+1. **Development**: Use local PostgreSQL with Prisma
+2. **Testing**: Apply migrations to staging Supabase project
+3. **Production**: Deploy migrations to production Supabase
+4. **Monitoring**: Use Supabase dashboard for database insights
+
+This setup gives you the best developer experience while leveraging Supabase's managed infrastructure for production reliability.
