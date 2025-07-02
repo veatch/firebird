@@ -19,6 +19,7 @@ A web application that analyzes your Spotify listening history by identifying yo
 - **State Management**: Zustand (lightweight)
 - **Icons**: Lucide React
 - **Database**: PostgreSQL 17.4 (Docker) / Supabase (Production)
+- **ORM**: Prisma with PostgreSQL
 - **Caching**: Redis (optional)
 
 ## Getting Started
@@ -126,6 +127,136 @@ npm run db:backup
 ```
 
 For detailed Docker documentation, see [docker/README.md](docker/README.md).
+
+## Database & Prisma
+
+This project uses **Prisma ORM** with PostgreSQL for database management. The schema includes tables for users, playlists, playlist tracks, and calculated song rankings.
+
+### Database Setup
+
+1. **Start the PostgreSQL container**
+   ```bash
+   docker start firebird-postgres
+   ```
+
+2. **Install Prisma dependencies** (if not already installed)
+   ```bash
+   npm install prisma @prisma/client
+   npm install -D @types/pg
+   ```
+
+3. **Set up environment variables**
+   ```bash
+   cp .env.local .env
+   ```
+   
+   Make sure your `.env` contains:
+   ```env
+   DATABASE_URL="postgresql://postgres:postgres@localhost:5432/firebird_dev"
+   ```
+
+4. **Run database migrations**
+   ```bash
+   npx prisma migrate dev --name init
+   ```
+
+### Prisma Commands
+
+```bash
+# Generate Prisma Client (after schema changes)
+npx prisma generate
+
+# Create and apply new migration
+npx prisma migrate dev --name <migration_name>
+
+# Reset database (development only - deletes all data)
+npx prisma migrate reset
+
+# Deploy migrations to production
+npx prisma migrate deploy
+
+# View database in browser
+npx prisma studio
+
+# Introspect existing database
+npx prisma db pull
+
+# Push schema changes (development only)
+npx prisma db push
+```
+
+### Prisma Studio
+
+**Prisma Studio** is a visual database browser that lets you view and edit your data:
+
+```bash
+npx prisma studio
+```
+
+This opens a web interface at `http://localhost:5555` where you can:
+- Browse all tables and their data
+- Add, edit, or delete records
+- Filter and sort data
+- Export data
+- View relationships between tables
+
+### Database Schema
+
+The application uses these main tables:
+
+- **`users`** - Spotify user authentication and session data
+- **`playlists`** - User's Spotify playlists (especially "Your Top Songs" playlists)
+- **`playlist_tracks`** - Individual tracks within playlists with their positions
+- **`song_rankings`** - Pre-calculated popularity scores and statistics
+
+### Production Deployment
+
+When deploying to production (e.g., Supabase):
+
+1. **Update environment variables**
+   ```env
+   DATABASE_URL="postgresql://postgres:[password]@[supabase-host]:5432/postgres"
+   ```
+
+2. **Deploy migrations**
+   ```bash
+   npx prisma migrate deploy
+   ```
+
+3. **Generate production client**
+   ```bash
+   npx prisma generate
+   ```
+
+### Using Prisma in Your Code
+
+```typescript
+// lib/db.ts
+import { PrismaClient } from '@prisma/client'
+
+const globalForPrisma = globalThis as unknown as {
+  prisma: PrismaClient | undefined
+}
+
+export const prisma = globalForPrisma.prisma ?? new PrismaClient()
+
+if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma
+```
+
+```typescript
+// Example API route
+import { prisma } from '@/lib/db'
+
+export async function GET() {
+  const playlists = await prisma.playlist.findMany({
+    include: {
+      playlistTracks: true,
+    },
+  })
+  
+  return Response.json(playlists)
+}
+```
 
 ## How It Works
 
