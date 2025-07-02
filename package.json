@@ -7,7 +7,15 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "docker:reset": "docker-compose down -v && docker-compose up -d",
+    "docker:logs": "docker-compose logs -f",
+    "docker:ps": "docker-compose ps",
+    "db:connect": "docker exec -it firebird-postgres psql -U postgres -d firebird_dev",
+    "db:backup": "docker exec firebird-postgres pg_dump -U postgres firebird_dev > backup_$(date +%Y%m%d_%H%M%S).sql",
+    "db:restore": "echo 'Usage: docker exec -i firebird-postgres psql -U postgres -d firebird_dev < backup_file.sql'"
   },
   "dependencies": {
     "next": "14.0.0",

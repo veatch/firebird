@@ -18,6 +18,8 @@ A web application that analyzes your Spotify listening history by identifying yo
 - **Spotify API**: Official Spotify Web API SDK
 - **State Management**: Zustand (lightweight)
 - **Icons**: Lucide React
+- **Database**: PostgreSQL 17.4 (Docker) / Supabase (Production)
+- **Caching**: Redis (optional)
 
 ## Getting Started
 
@@ -26,6 +28,39 @@ A web application that analyzes your Spotify listening history by identifying yo
 - Node.js 18+ 
 - npm or yarn
 - Spotify Developer Account
+- Docker and Docker Compose (for database)
+
+### Development Environment Setup
+
+#### Option 1: Docker (Recommended)
+
+1. **Start the database services**
+   ```bash
+   npm run docker:up
+   ```
+
+2. **Verify services are running**
+   ```bash
+   npm run docker:ps
+   ```
+
+3. **Environment Variables**
+   ```bash
+   cp env.example .env.local
+   ```
+   
+   The Docker setup automatically configures:
+   ```env
+   DATABASE_URL=postgresql://postgres:postgres@localhost:5432/firebird_dev
+   REDIS_URL=redis://localhost:6379
+   ```
+
+#### Option 2: Local PostgreSQL
+
+If you prefer to install PostgreSQL locally:
+1. Install PostgreSQL 17.4 on your system
+2. Create a database named `firebird_dev`
+3. Update `DATABASE_URL` in `.env.local` to point to your local instance
 
 ### Setup
 
@@ -66,6 +101,31 @@ A web application that analyzes your Spotify listening history by identifying yo
 
 6. **Open your browser**
    Navigate to [http://localhost:3000](http://localhost:3000)
+
+## Docker Commands
+
+### Database Management
+```bash
+# Start services
+npm run docker:up
+
+# Stop services
+npm run docker:down
+
+# Reset database (WARNING: deletes all data)
+npm run docker:reset
+
+# View logs
+npm run docker:logs
+
+# Connect to PostgreSQL
+npm run db:connect
+
+# Backup database
+npm run db:backup
+```
+
+For detailed Docker documentation, see [docker/README.md](docker/README.md).
 
 ## How It Works
 
