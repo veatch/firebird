@@ -43,7 +43,7 @@ A web application that analyzes your Spotify listening history by identifying yo
 3. **Set up Spotify Developer App**
    - Go to [Spotify Developer Dashboard](https://developer.spotify.com/dashboard)
    - Create a new app
-   - Add `http://localhost:3000/api/auth/callback/spotify` to Redirect URIs
+   - Add `http://127.0.0.1:3000/api/auth/callback/spotify` to Redirect URIs
    - Copy your Client ID and Client Secret
 
 4. **Environment Variables**
@@ -53,7 +53,7 @@ A web application that analyzes your Spotify listening history by identifying yo
    
    Edit `.env.local` and add your Spotify credentials:
    ```env
-   NEXTAUTH_URL=http://localhost:3000
+   NEXTAUTH_URL=http://127.0.0.1:3000
    NEXTAUTH_SECRET=your-random-secret-key
    SPOTIFY_CLIENT_ID=your-spotify-client-id
    SPOTIFY_CLIENT_SECRET=your-spotify-client-secret
