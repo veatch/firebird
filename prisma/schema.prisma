@@ -24,6 +24,7 @@ model User {
   
   playlists     Playlist[]
   songRankings  SongRanking[]
+  syncJobs      SyncJob[]
   
   @@map("users")
 }
@@ -79,4 +80,19 @@ model SongRanking {
   
   @@unique([userId, spotifyTrackId])
   @@map("song_rankings")
+}
+
+model SyncJob {
+  id          String   @id @default(cuid())
+  userId      String   @map("user_id")
+  status      String   // PENDING, PROCESSING, COMPLETED, FAILED
+  progress    Int      @default(0) // 0-100
+  error       String?  // Error message if failed
+  startedAt   DateTime @default(now()) @map("started_at")
+  completedAt DateTime? @map("completed_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("sync_jobs")
 }
