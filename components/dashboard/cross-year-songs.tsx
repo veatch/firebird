@@ -32,24 +32,37 @@ export function CrossYearSongs() {
   const [threshold, setThreshold] = useState<number>(50) // Default to top 50
   const [showThresholdInput, setShowThresholdInput] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [minYear, setMinYear] = useState<number | null>(null)
+  const [maxYear, setMaxYear] = useState<number | null>(null)
+  const [availableYears, setAvailableYears] = useState<number[]>([])
 
   useEffect(() => {
     fetchCrossYearSongs()
-  }, [threshold])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [threshold, minYear, maxYear])
 
   const fetchCrossYearSongs = async () => {
     try {
       setLoading(true)
       setError(null)
-      
-      const response = await fetch(`/api/songs/cross-year?threshold=${threshold}`)
+      let url = `/api/songs/cross-year?threshold=${threshold}`
+      if (minYear !== null) url += `&minYear=${minYear}`
+      if (maxYear !== null) url += `&maxYear=${maxYear}`
+      const response = await fetch(url)
       const data: CrossYearSongsResponse = await response.json()
-      
       if (!response.ok) {
         throw new Error(data.error || 'Failed to fetch cross-year songs')
       }
-      
       setSongs(data.songs)
+      // Determine available years from the response
+      const allYears = Array.from(new Set(data.songs.flatMap(song => song.years_list)))
+      allYears.sort((a, b) => a - b)
+      setAvailableYears(allYears)
+      // Set minYear and maxYear defaults if not set
+      if (allYears.length > 0) {
+        setMinYear(prev => prev === null ? allYears[0] : prev)
+        setMaxYear(prev => prev === null ? allYears[allYears.length - 1] : prev)
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred')
     } finally {
@@ -158,7 +171,7 @@ export function CrossYearSongs() {
       {showThresholdInput && (
         <Card>
           <CardContent className="p-4">
-            <div className="flex items-center gap-4">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:gap-8">
               <div className="flex-1">
                 <label htmlFor="threshold" className="text-sm font-medium">
                   Position Threshold
@@ -178,6 +191,42 @@ export function CrossYearSongs() {
                   className="w-20 h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                 />
                 <span className="text-sm text-muted-foreground">positions</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <label htmlFor="minYear" className="text-sm font-medium">Min Year</label>
+                <select
+                  id="minYear"
+                  value={minYear ?? ''}
+                  onChange={e => {
+                    const val = parseInt(e.target.value)
+                    setMinYear(val)
+                    if (maxYear !== null && val > maxYear) setMaxYear(val)
+                  }}
+                  disabled={availableYears.length === 0}
+                  className="w-24 h-10 rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <option value="" disabled>Select</option>
+                  {availableYears.map(year => (
+                    <option key={year} value={year}>{year}</option>
+                  ))}
+                </select>
+                <label htmlFor="maxYear" className="text-sm font-medium">Max Year</label>
+                <select
+                  id="maxYear"
+                  value={maxYear ?? ''}
+                  onChange={e => {
+                    const val = parseInt(e.target.value)
+                    setMaxYear(val)
+                    if (minYear !== null && val < minYear) setMinYear(val)
+                  }}
+                  disabled={availableYears.length === 0}
+                  className="w-24 h-10 rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <option value="" disabled>Select</option>
+                  {availableYears.map(year => (
+                    <option key={year} value={year}>{year}</option>
+                  ))}
+                </select>
               </div>
             </div>
           </CardContent>

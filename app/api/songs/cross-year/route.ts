@@ -32,6 +32,12 @@ export async function GET(request: NextRequest) {
     const threshold = parseInt(searchParams.get('threshold') || '50')
     const maxThreshold = Math.max(1, Math.min(100, threshold)) // Clamp between 1 and 100
 
+    // Parse minYear and maxYear from query params
+    const minYearParam = searchParams.get('minYear')
+    const maxYearParam = searchParams.get('maxYear')
+    const minYear = minYearParam ? parseInt(minYearParam) : null
+    const maxYear = maxYearParam ? parseInt(maxYearParam) : null
+
     // Get user from database
     const user = await prisma.user.findUnique({
       where: { spotifyId: session.user?.id as string }
@@ -41,8 +47,25 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 })
     }
 
-    // Query songs that appear in multiple years, filtered by position threshold
-    const crossYearSongs = await prisma.$queryRaw`
+    // Build dynamic WHERE clause and parameters
+    let whereClauses = [
+      `sby.user_id = $1`,
+      `sby.position <= $2`
+    ]
+    let params: any[] = [user.id, maxThreshold]
+    let paramIndex = 3
+    if (minYear !== null) {
+      whereClauses.push(`sby.year >= $${paramIndex}`)
+      params.push(minYear)
+      paramIndex++
+    }
+    if (maxYear !== null) {
+      whereClauses.push(`sby.year <= $${paramIndex}`)
+      params.push(maxYear)
+      paramIndex++
+    }
+    const whereSql = whereClauses.join(' AND ')
+    const query = `
       SELECT 
         sby.spotify_track_id,
         sby.track_name,
@@ -55,12 +78,12 @@ export async function GET(request: NextRequest) {
         MAX(sby.position) as worst_position,
         COUNT(*) as total_appearances
       FROM songs_by_year sby
-      WHERE sby.user_id = ${user.id}
-        AND sby.position <= ${maxThreshold}
+      WHERE ${whereSql}
       GROUP BY sby.spotify_track_id, sby.track_name, sby.artist_name, sby.album_name
       HAVING COUNT(DISTINCT sby.year) > 1
       ORDER BY years_appeared DESC, average_position ASC
     `
+    const crossYearSongs = await prisma.$queryRawUnsafe(query, ...params)
 
     return NextResponse.json({ 
       songs: convertBigInts(crossYearSongs),
