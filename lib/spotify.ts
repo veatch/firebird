@@ -34,16 +34,26 @@ export class SpotifyClient {
   }
 
   async getUserPlaylists(): Promise<Playlist[]> {
-    const response = await this.api.currentUser.playlists.playlists()
-    return response.items.map(playlist => ({
-      id: playlist.id,
-      name: playlist.name,
-      description: playlist.description || '',
-      images: playlist.images || [],
-      tracks: {
-        total: playlist.tracks?.total || 0
-      }
-    }))
+    const limit = 50;
+    let offset = 0;
+    let allPlaylists: Playlist[] = [];
+    let total = 0;
+    do {
+      const response = await this.api.currentUser.playlists.playlists(limit, offset);
+      const playlists = response.items.map(playlist => ({
+        id: playlist.id,
+        name: playlist.name,
+        description: playlist.description || '',
+        images: playlist.images || [],
+        tracks: {
+          total: playlist.tracks?.total || 0
+        }
+      }));
+      allPlaylists = allPlaylists.concat(playlists);
+      total = response.total;
+      offset += limit;
+    } while (allPlaylists.length < total);
+    return allPlaylists;
   }
 
   identifyTopSongsPlaylists(playlists: Playlist[]): Playlist[] {
@@ -77,5 +87,66 @@ export class SpotifyClient {
         }
       }
     }).filter(track => track.id)
+  }
+
+  async getPlaylistMetadata(playlistId: string): Promise<Playlist> {
+    console.log('Getting playlist metadata for:', playlistId);
+    const playlistMeta = await this.api.playlists.getPlaylist(playlistId)
+    console.log('playlistMeta:', playlistMeta);
+    return {
+      id: playlistMeta.id,
+      name: playlistMeta.name,
+      description: playlistMeta.description || '',
+      images: playlistMeta.images || [],
+      tracks: {
+        total: playlistMeta.tracks?.total || 0
+      }
+    }
+  }
+
+  extractSongIdsFromUrls(urls: string): string[] {
+    const urlRegex = /track\/(\w+)/g
+    const ids = []
+    let match
+    while ((match = urlRegex.exec(urls)) !== null) {
+      ids.push(match[1])
+    }
+    return ids
+  }
+
+  async getTrackInfo(trackId: string): Promise<Track | null> {
+    try {
+      const track = await this.api.tracks.get(trackId)
+      return {
+        id: track.id,
+        name: track.name,
+        artists: track.artists.map(artist => ({
+          id: artist.id,
+          name: artist.name
+        })),
+        album: {
+          id: track.album.id,
+          name: track.album.name,
+          images: track.album.images
+        }
+      }
+    } catch (error) {
+      console.error(`Failed to fetch track ${trackId}:`, error)
+      return null
+    }
+  }
+
+  async getTracksFromUrls(urls: string): Promise<Track[]> {
+    const trackIds = this.extractSongIdsFromUrls(urls)
+    const tracks: Track[] = []
+    
+    for (const trackId of trackIds) {
+      const track = await this.getTrackInfo(trackId)
+      if (track) {
+        tracks.push(track)
+      } 
+    }
+    
+    return tracks
   }
 } 

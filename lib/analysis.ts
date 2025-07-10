@@ -49,7 +49,41 @@ export async function analyzePlaylists(
   const trackGroups = groupByTrack(songAppearances)
   const analysis: SongAnalysis[] = []
   
-  for (const [trackId, appearances] of trackGroups) {
+  for (const [trackId, appearances] of Array.from(trackGroups.entries())) {
+    const analysisItem = calculateSongAnalysis(trackId, appearances)
+    analysis.push(analysisItem)
+  }
+  
+  // Sort by popularity score (descending)
+  return analysis.sort((a, b) => b.popularityScore - a.popularityScore)
+}
+
+export async function analyzeSongsByYear(
+  spotify: SpotifyClient,
+  songsByYear: { year: number; songUrls: string }[]
+): Promise<SongAnalysis[]> {
+  const songAppearances: SongAppearance[] = []
+  
+  for (const { year, songUrls } of songsByYear) {
+    const tracks = await spotify.getTracksFromUrls(songUrls)
+    
+    tracks.forEach((track, index) => {
+      songAppearances.push({
+        trackId: track.id,
+        trackName: track.name,
+        artistName: track.artists[0]?.name || 'Unknown Artist',
+        year,
+        rank: index + 1,
+        albumImage: track.album.images[0]?.url
+      })
+    })
+  }
+  
+  // Group by track and calculate scores
+  const trackGroups = groupByTrack(songAppearances)
+  const analysis: SongAnalysis[] = []
+  
+  for (const [trackId, appearances] of Array.from(trackGroups.entries())) {
     const analysisItem = calculateSongAnalysis(trackId, appearances)
     analysis.push(analysisItem)
   }

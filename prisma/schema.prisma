@@ -25,6 +25,7 @@ model User {
   playlists     Playlist[]
   songRankings  SongRanking[]
   syncJobs      SyncJob[]
+  songsByYear   SongByYear[]
   
   @@map("users")
 }
@@ -95,4 +96,22 @@ model SyncJob {
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   
   @@map("sync_jobs")
+}
+
+model SongByYear {
+  id              String   @id @default(cuid())
+  userId          String   @map("user_id")
+  year            Int
+  spotifyTrackId  String   @map("spotify_track_id")
+  trackName       String   @map("track_name")
+  artistName      String   @map("artist_name")
+  albumName       String   @map("album_name")
+  albumImageUrl   String?  @map("album_image_url")
+  position        Int      // Position in the year's list
+  addedAt         DateTime @default(now()) @map("added_at")
+  
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@unique([userId, year, spotifyTrackId])
+  @@map("songs_by_year")
 }
