@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useSession } from 'next-auth/react'
 import { SongsByYearInput } from './songs-by-year-input'
+import { CrossYearSongs } from './cross-year-songs'
 
 export function DashboardContent() {
   const { data: session } = useSession()
@@ -19,6 +20,7 @@ export function DashboardContent() {
       </div>
 
       <SongsByYearInput />
+      <CrossYearSongs />
     </div>
   )
 } 
