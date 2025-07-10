@@ -27,6 +27,11 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    // Get threshold from query parameters
+    const { searchParams } = new URL(request.url)
+    const threshold = parseInt(searchParams.get('threshold') || '50')
+    const maxThreshold = Math.max(1, Math.min(100, threshold)) // Clamp between 1 and 100
+
     // Get user from database
     const user = await prisma.user.findUnique({
       where: { spotifyId: session.user?.id as string }
@@ -36,7 +41,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 })
     }
 
-    // Query songs that appear in multiple years
+    // Query songs that appear in multiple years, filtered by position threshold
     const crossYearSongs = await prisma.$queryRaw`
       SELECT 
         sby.spotify_track_id,
@@ -51,6 +56,7 @@ export async function GET(request: NextRequest) {
         COUNT(*) as total_appearances
       FROM songs_by_year sby
       WHERE sby.user_id = ${user.id}
+        AND sby.position <= ${maxThreshold}
       GROUP BY sby.spotify_track_id, sby.track_name, sby.artist_name, sby.album_name
       HAVING COUNT(DISTINCT sby.year) > 1
       ORDER BY years_appeared DESC, average_position ASC

@@ -3,7 +3,8 @@
 import { useState, useEffect } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Loader2, Music, Calendar } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Loader2, Music, Calendar, Filter, Clipboard } from 'lucide-react'
 
 interface CrossYearSong {
   spotify_track_id: string
@@ -28,17 +29,20 @@ export function CrossYearSongs() {
   const [songs, setSongs] = useState<CrossYearSong[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [threshold, setThreshold] = useState<number>(50) // Default to top 50
+  const [showThresholdInput, setShowThresholdInput] = useState(false)
+  const [copied, setCopied] = useState(false)
 
   useEffect(() => {
     fetchCrossYearSongs()
-  }, [])
+  }, [threshold])
 
   const fetchCrossYearSongs = async () => {
     try {
       setLoading(true)
       setError(null)
       
-      const response = await fetch('/api/songs/cross-year')
+      const response = await fetch(`/api/songs/cross-year?threshold=${threshold}`)
       const data: CrossYearSongsResponse = await response.json()
       
       if (!response.ok) {
@@ -50,6 +54,22 @@ export function CrossYearSongs() {
       setError(err instanceof Error ? err.message : 'An error occurred')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleThresholdChange = (value: string) => {
+    const numValue = parseInt(value) || 50
+    setThreshold(Math.max(1, Math.min(100, numValue))) // Clamp between 1 and 100
+  }
+
+  const handleCopyUrls = async () => {
+    const urls = songs.map(song => `https://open.spotify.com/track/${song.spotify_track_id}`).join('\n')
+    try {
+      await navigator.clipboard.writeText(urls)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch (err) {
+      // Optionally handle error
     }
   }
 
@@ -108,10 +128,61 @@ export function CrossYearSongs() {
             These songs appeared in your top songs across multiple years, showing your consistent favorites.
           </p>
         </div>
-        <Badge variant="secondary" className="text-sm">
-          {songs.length} songs found
-        </Badge>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowThresholdInput(!showThresholdInput)}
+            className="flex items-center gap-2"
+          >
+            <Filter className="h-4 w-4" />
+            Filter
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleCopyUrls}
+            className="flex items-center gap-2"
+            disabled={songs.length === 0}
+            aria-label="Copy song URLs"
+          >
+            <Clipboard className="h-4 w-4" />
+            {copied ? 'Copied!' : 'Copy'}
+          </Button>
+          <Badge variant="secondary" className="text-sm">
+            {songs.length} songs found
+          </Badge>
+        </div>
       </div>
+
+      {showThresholdInput && (
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center gap-4">
+              <div className="flex-1">
+                <label htmlFor="threshold" className="text-sm font-medium">
+                  Position Threshold
+                </label>
+                <p className="text-xs text-muted-foreground">
+                  Only consider songs ranked within the top N positions each year
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  id="threshold"
+                  type="number"
+                  min="1"
+                  max="100"
+                  value={threshold}
+                  onChange={(e) => handleThresholdChange(e.target.value)}
+                  className="w-20 h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                />
+                <span className="text-sm text-muted-foreground">positions</span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid gap-4">
         {songs.map((song, index) => (
